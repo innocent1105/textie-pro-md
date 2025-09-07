@@ -1,5 +1,5 @@
 // UserMap.js
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef,useMemo, useState } from "react";
 import { View, Platform, Text,ScrollView, Image,Dimensions,Modal } from "react-native";
 import { WebView } from "react-native-webview";
 import * as Location from "expo-location";
@@ -14,12 +14,15 @@ import * as SecureStore from 'expo-secure-store';
 import { TextInput } from "react-native-gesture-handler";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as ImagePicker from "expo-image-picker";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function UserMap() {
   const navigation = useNavigation();
-  let server_api_base_url = "http://192.168.167.234/textiepro/apis/";
+  let server_api_base_url = "http://textie.atwebpages.com/";
 
   const [visible, setVisible] = useState(false);
+  const [tab, setTab] = useState("none");
+
   const [image, setImage] = useState(null);
 
   const pickImage = async () => {
@@ -73,34 +76,62 @@ export default function UserMap() {
   useEffect(() => {
     const fetchPins = async () => {
       try {
-        const res = await axios.get(`${server_api_base_url}get_pins.php`);
-        if (res.data) {
+        const res = await axios.post(`${server_api_base_url}get_pins.php`, {
+          headers: {
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (ReactNative)"
+          },
+        });
+
+        if (res.headers["content-type"]?.includes("application/json")) {
           setPins(res.data);
+          // console.log("Fetched pins:", res.data);
+        } else {
+          console.warn("Unexpected response type:", res.headers["content-type"]);
         }
+        console.log(res.data)
+        // setPins(response);
       } catch (err) {
-        console.error("Error fetching pins:", err);
+        console.error("Fetch error -2:", err);
       }
     };
-
+    
+  
     fetchPins();
+  
+    const interval = setInterval(fetchPins, 100000);
+  
+    return () => clearInterval(interval);
   }, []);
+  
 
   const pinsJS = pins
   .map(
-    (pin) => `
-    const icon${pin.id} = L.divIcon({
-      className: 'custom-marker',
-      html: '<div style="width: 50px; height: 50px; border-radius: 8px; overflow: hidden; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"><img src="${server_api_base_url}view_image.php?file=${pin.images}" style="width:100%; height:100%; object-fit:cover;" /></div>',
-      iconSize: [50, 50],
-      iconAnchor: [25, 25],
-      popupAnchor: [0, -25]
-    });
+    (pin) => {
+     
+      const angle = (Math.random() * 40 - 10).toFixed(2);
+      let scale = (Math.random() * 70).toFixed(2);
 
-    L.marker([${pin.lat}, ${pin.lng}], { icon: icon${pin.id} })
-      .addTo(map)
-      .bindPopup("<b>${pin.name}</b><br>${pin.description}");
-  `
+      if(scale < 30){
+        scale = 70;
+      }
+
+      return `
+        const icon${pin.id} = L.divIcon({
+          className: 'custom-marker',
+          html: '<style>.pinUserImage : hover{tranform: scale(1.5);}</style><div class="pinUserImage" style="width: ${scale}px; height: ${scale}px; border-radius: 8px; overflow: hidden; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transform: rotate(${angle}deg);"><img src="${server_api_base_url}view_image.php?file=${pin.images}" style="width:100%; height:100%; object-fit:cover;" /></div>',
+          iconSize: [50, 50],
+          iconAnchor: [25, 25],
+          popupAnchor: [0, -25]
+        });
+
+        L.marker([${pin.lat}, ${pin.lng}], { icon: icon${pin.id} })
+          .addTo(map)
+          .bindPopup("<b>${pin.name}</b><br>${pin.description}");
+      `;
+    }
   ).join("\n");
+
 
 
 
@@ -113,7 +144,7 @@ export default function UserMap() {
         const res = await axios.post(getUsersUrl, { user_id });
         if (res.data && Array.isArray(res.data)) {
           setUsers(res.data);
-          console.log("fetched users")
+          // console.log("fetched users")
         }
       } catch (err) {
         console.log("Error fetching users:", err);
@@ -126,7 +157,8 @@ export default function UserMap() {
 
   
 
-  const leafletHTML = `
+// inside your component
+const leafletHTML = useMemo(() => `
   <!DOCTYPE html>
   <html>
     <head>
@@ -157,7 +189,6 @@ export default function UserMap() {
       <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
       <script>
         (function(){
-          // forward console logs back to RN for easier debugging
           const _origConsole = console.log.bind(console);
           function forwardLog() {
             try {
@@ -167,13 +198,14 @@ export default function UserMap() {
           }
           console.log = forwardLog;
 
-          const map = L.map('map').setView([51.505, -0.09], 13);
+          const map = L.map('map').setView([-25.2, 30.7785195], 3);
+          map.on("dragstart", ()=>{ map._userMoved = true; });
+
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
           }).addTo(map);
 
-          const users = ${usersJson};
-
+          const users = ${JSON.stringify(users)};
           const avatarIcon = (url) => L.divIcon({
             className: 'avatar-marker',
             html: '<div class="avatar-badge"><img src="http://textie.atwebpages.com/view_pp.php?file='+url+'" /></div>',
@@ -194,7 +226,6 @@ export default function UserMap() {
             }
           });
 
-          // current user marker + helper
           let youMarker = null;
           function setCurrentLocation(lat, lng) {
             try {
@@ -207,33 +238,33 @@ export default function UserMap() {
                   iconAnchor: [8,8]
                 })
               }).addTo(map).bindPopup("You are here");
-              map.setView([lat, lng], 14);
+
+              if (!map._userMoved) {
+                map.setView([lat, lng], 14);
+              }
             } catch (e) {
               console.log('setCurrentLocation error', e);
             }
           }
-
-          // expose function
           window.setRNLocation = setCurrentLocation;
 
-          // receive messages from RN (cross-platform: document & window)
-          function handleIncoming(event) {
+          document.addEventListener('message', e => {
             try {
-              const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-              if (!data) return;
-              if (data.type === 'location' && data.lat && data.lng) {
-                setCurrentLocation(data.lat, data.lng);
-              } else if (data.type === 'setLocation' && data.lat && data.lng) {
+              const data = JSON.parse(e.data);
+              if(data?.type === 'location' && data.lat && data.lng){
                 setCurrentLocation(data.lat, data.lng);
               }
-            } catch (e) {
-              // ignore malformed messages
-            }
-          }
-          document.addEventListener('message', handleIncoming);
-          window.addEventListener('message', handleIncoming);
+            } catch(e){}
+          });
+          window.addEventListener('message', e => {
+            try {
+              const data = JSON.parse(e.data);
+              if(data?.type === 'location' && data.lat && data.lng){
+                setCurrentLocation(data.lat, data.lng);
+              }
+            } catch(e){}
+          });
 
-          // tell RN that map is ready
           map.whenReady(() => {
             try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' })); } catch (e) {}
           });
@@ -241,37 +272,25 @@ export default function UserMap() {
           ${pinsJS}
 
           let currentPin = null;
-
           map.on("click", function (e) {
             const lat = e.latlng.lat;
             const lng = e.latlng.lng;
-
-            // Remove old pin if it exists
-            if (currentPin) {
-              map.removeLayer(currentPin);
-            }
-
-            // Add new pin
+            if (currentPin) map.removeLayer(currentPin);
             currentPin = L.marker([lat, lng]).addTo(map)
               .bindPopup("Pin this location")
               .openPopup();
-
             currentPin.addEventListener("click", ()=>{
               window.ReactNativeWebView.postMessage(
                 JSON.stringify({ type: "mapClick", payload: { lat, lng } })
               );
-            })
-
-       
+            });
           });
-
 
         })();
       </script>
     </body>
   </html>
-  `;
-
+`, [users, pinsJS]); 
   const [address, setAddress] = useState(null);
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
@@ -422,6 +441,7 @@ export default function UserMap() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setPinFormError("")
+      console.log(res.data)
     } catch (err) {
       console.error("Save Pin Error:", err);
     }
@@ -461,8 +481,6 @@ export default function UserMap() {
       setPlaceName(null)
       setDescription(null)
       setTags(null)
-      setLat(null)
-      setLng(null)
       setImage(null);
 
       setTimeout(()=>{
@@ -477,6 +495,8 @@ export default function UserMap() {
       setLoading(false);
     }
   };
+
+  const [clickedUser, setCUser] = useState(null)
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -590,8 +610,10 @@ export default function UserMap() {
             setVisible(true);
           }
 
+          // this part here 
           if (data.type === "user") {
             console.log("User clicked marker:", data.payload);
+            setCUser(data.payload)
           }
         }}
         style={{ flex: 1 }}
@@ -641,21 +663,22 @@ export default function UserMap() {
         <View className=" w-full flex flex-row right-0 py-1">
           <View className="  mr-1 flex flex-row rounded-full bg-white p-2">
             <Feather name="map-pin" size={24} color="#4D4DFF" />
-            <Text className=" font-bold px-1 pt-1 text-blue-700 text-sm">Places</Text>
+            <Text className=" font-bold px-1 pt-1 text-blue-700 text-sm">Pins</Text>
           </View>
 
           <View className=" mr-1 flex flex-row rounded-full bg-white p-2">
             <Feather name="user" size={24} color="#6495ED" />
             <Text className=" font-bold px-1 pt-1 text-blue-400 text-sm">Near me</Text>
           </View>
-          <View className=" mr-1 flex flex-row rounded-full bg-white p-2">
+          {/* <View className=" mr-1 flex flex-row rounded-full bg-white p-2">
             <Ionicons name="balloon-outline" size={24} color="#008B8B" />
             <Text className=" font-bold px-1 pt-1 text-green-600 text-sm">Memories</Text>
-          </View>
+          </View> */}
         </View>
         
-        <View className=" rounded-3xl bg-white flex-1">
-          <Text className="font-bold text-lg text-gray-800 p-4 pb-0">Places</Text>
+        {tab == "pins" && (
+          <View className=" rounded-3xl bg-white flex-1">
+          <Text className="font-bold text-lg text-gray-800 p-4 pb-0">Pins and moments</Text>
 
           <ScrollView
             className="p-4 after:rounded-3xl overflow-hidden"
@@ -677,7 +700,7 @@ export default function UserMap() {
                 </View>
                 <View className="mt-4 mr-4">
                   <View className="flex flex-row justify-between">
-                    <Text className="pl-2 font-bold px-4 py-2 rounded-full">
+                    <Text className="pl-2 font-bold px-2 py-2 rounded-full">
                       {pin.name}
                     </Text>
                     <Text className="pl-2 text-blue-500 font-bold border-2 border-blue-200 bg-blue-100 px-4 py-2 rounded-full">
@@ -692,11 +715,10 @@ export default function UserMap() {
                     </View>
 
                     <View className="flex flex-row px-2">
-                      {[1,2,3,4,5].map((_, starIndex) => (
-                        <Text key={starIndex}>
-                          <AntDesign name="star" size={14} color="#FEBE10" />
-                        </Text>
-                      ))}
+                      <AntDesign name="star" size={14} color="#FEBE10" />
+                      <Text className =" text-gray-400 text-xs px-1">
+                        Reviews
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -705,6 +727,35 @@ export default function UserMap() {
           </ScrollView>
 
         </View>
+        )}
+
+        {clickedUser && (
+          <View  className=" rounded-3xl bg-white flex-1 p-4 pb-20">
+          <Text className="font-bold text-lg text-gray-800 pb-2">Profile</Text>
+
+            <View className=" flex flex-row justify-between">
+              <View className=" flex flex-row ">
+                <View className =" rounded-xl overflow-hidden">
+                  <Image
+                    source={{ uri: `${server_api_base_url}view_pp.php?file=${clickedUser.avatar}` }}
+                    className=" w-16 h-16"
+                    resizeMode="cover" 
+                  />
+                </View>
+                <View className="  mx-2">
+                  <Text className =" text-lg text-gray-700 font-semibold">{clickedUser.name}</Text>
+                  <Text className =" text-sm text-gray-500">Lives in {clickedUser.city}</Text>
+                </View>
+              </View>
+
+              <View className=" ">
+                <TouchableOpacity className="bg-blue-700 p-6 py-2 rounded-md">
+                  <Text className=" text-white text-lg font-bold ">Message</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
 
        
       </View>

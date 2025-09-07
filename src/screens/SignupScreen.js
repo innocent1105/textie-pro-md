@@ -14,7 +14,7 @@ import axios from "axios";
 import { ActivityIndicator } from "react-native";
 
 
-let server_api_base_url = "http://192.168.167.234/textiepro/apis/";
+let server_api_base_url = "http://textie.atwebpages.com/";
 const { width, height } = Dimensions.get("window");
 
 export default function LoginScreen() {
