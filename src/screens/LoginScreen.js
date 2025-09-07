@@ -24,6 +24,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setFError] = useState("");
 
+  
   const handleLogin = async () => {
     if (email.length === 0) {
       setFError("Email field is empty");
@@ -55,7 +56,7 @@ export default function LoginScreen() {
       if (response.data.status === "success") {
         const user_id = response.data.user_id;
         await SecureStore.setItemAsync('id', user_id);
-        navigation.navigate("Home", { user: response.data });
+        navigation.replace("Home", { user: response.data });
 
       } else if (response.data === "wrong-password") {
         setFError("Incorrect password");

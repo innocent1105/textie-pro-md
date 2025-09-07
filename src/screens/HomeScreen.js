@@ -1,6 +1,6 @@
 // UserMap.js
 import React, { useEffect, useRef,useMemo, useState } from "react";
-import { View, Platform, Text,ScrollView, Image,Dimensions,Modal } from "react-native";
+import { View, Platform, Text,ScrollView, Image,ActivityIndicator ,Dimensions,Modal } from "react-native";
 import { WebView } from "react-native-webview";
 import * as Location from "expo-location";
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -16,8 +16,41 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function UserMap() {
+const loadUserId = async () => {
+ 
+
+
+  try {
+    let user_id = await SecureStore.getItemAsync('id');
+    if (user_id) {
+      console.log("User ID:", user_id);
+
+      return user_id;
+    } else {
+      console.log("No user ID found in storage");
+      navigation.replace("Login");
+    }
+  } catch (error) {
+    console.error("Error reading user_id from storage:", error);
+  }
+};
+
+export default function HomeScreen() {
   const navigation = useNavigation();
+  const [mapLoading, setMapLoading] = useState(true);
+
+
+  useEffect(() => {
+    const fetchUserId = async () => {
+      const id = await loadUserId();
+      if (id) {
+        console.log("Loaded user ID:", id);
+      }
+    };
+  
+    fetchUserId();
+  }, []);
+
   let server_api_base_url = "http://textie.atwebpages.com/";
 
   const [visible, setVisible] = useState(false);
@@ -56,14 +89,6 @@ export default function UserMap() {
 
   const { width } = Dimensions.get("window");
 
-  const placeImages = [
-    "https://picsum.photos/200/200?random=1",
-    "https://picsum.photos/200/200?random=2",
-    "https://picsum.photos/200/200?random=3",
-    "https://picsum.photos/200/200?random=4",
-    "https://picsum.photos/200/200?random=5",
-  ];
-
 
   const webviewRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
@@ -85,16 +110,26 @@ export default function UserMap() {
 
         if (res.headers["content-type"]?.includes("application/json")) {
           setPins(res.data);
-          // console.log("Fetched pins:", res.data);
+         
+ 
+          try {
+            const response = await axios.post(
+              server_api_base_url + "save_coordinates.php",
+              { address }
+            );
+            console.log("Coordinates saved:", response.data);
+          } catch (error) {
+            console.error("Save coordinates error:", error.response?.data || error.message);
+          }
+  
         } else {
           console.warn("Unexpected response type:", res.headers["content-type"]);
         }
-        console.log(res.data)
-        // setPins(response);
+ 
       } catch (err) {
         console.error("Fetch error -2:", err);
-      }
-    };
+      } 
+    };  
     
   
     fetchPins();
@@ -141,10 +176,11 @@ export default function UserMap() {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
+
         const res = await axios.post(getUsersUrl, { user_id });
         if (res.data && Array.isArray(res.data)) {
           setUsers(res.data);
-          // console.log("fetched users")
+
         }
       } catch (err) {
         console.log("Error fetching users:", err);
@@ -155,12 +191,13 @@ export default function UserMap() {
   }, []);
 
 
+
   
 
 // inside your component
 const leafletHTML = useMemo(() => `
   <!DOCTYPE html>
-  <html>
+  <html> 
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
@@ -168,6 +205,23 @@ const leafletHTML = useMemo(() => `
       <style>
         html,body,#map { height:100%; margin:0; padding:0; }
         #map { width:100%; height:100vh; }
+
+        @keyframes wiggle {
+          0% { transform: scale(1); 
+      
+          }
+          10% { transform: scale(2)}
+          25% { transform: scale(2) }
+          50% { transform: scale(2)  }
+          75% { transform: scale(1.5) translate(-5px, 5px) rotate(-5deg); }
+          90% { transform: scale(1.5) translate(-5px, 5px) rotate(-5deg); }
+          100% { transform: scale(1) translate(0,0) rotate(0deg); }
+        }
+        
+        .pin-bounce {
+          animation: wiggle 1s ease-in-out;
+        }
+        
 
         .avatar-marker { background: transparent; border: none; }
         .avatar-badge {
@@ -206,25 +260,38 @@ const leafletHTML = useMemo(() => `
           }).addTo(map);
 
           const users = ${JSON.stringify(users)};
+          
           const avatarIcon = (url) => L.divIcon({
             className: 'avatar-marker',
-            html: '<div class="avatar-badge"><img src="http://textie.atwebpages.com/view_pp.php?file='+url+'" /></div>',
+            html: '<div class="avatar-badge"><img class="pinUserImage" src="http://textie.atwebpages.com/view_pp.php?file='+url+'" /></div>',
             iconSize: [48,48],
             iconAnchor: [24,24],
-            popupAnchor: [0,-26]
+            popupAnchor: [0,-20]
           });
 
           users.forEach(user => {
             try {
               const marker = L.marker(user.position, { icon: avatarIcon(user.avatar) }).addTo(map);
               marker.bindPopup("<b>" + user.name + "</b><br>" + user.email);
-              marker.on("click", () => {
+          
+              marker.on("click", (e) => {
+                const el = e.target._icon.querySelector(".avatar-badge"); // fix selector
+                if (el) {
+                  el.classList.add("pin-bounce");
+                  setTimeout(() => el.classList.remove("pin-bounce"), 1500);
+                }
+           
+
+                // move map to marker
+                map.setView(user.position, 18);
+          
                 window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'user', payload: user }));
               });
             } catch (e) {
               console.log('marker error', e);
             }
           });
+          
 
           let youMarker = null;
           function setCurrentLocation(lat, lng) {
@@ -279,7 +346,7 @@ const leafletHTML = useMemo(() => `
             currentPin = L.marker([lat, lng]).addTo(map)
               .bindPopup("Pin this location")
               .openPopup();
-            currentPin.addEventListener("click", ()=>{
+            currentPin.addEventListener("click", ()=> {
               window.ReactNativeWebView.postMessage(
                 JSON.stringify({ type: "mapClick", payload: { lat, lng } })
               );
@@ -290,7 +357,10 @@ const leafletHTML = useMemo(() => `
       </script>
     </body>
   </html>
-`, [users, pinsJS]); 
+`, [users, pins]);
+
+
+
   const [address, setAddress] = useState(null);
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
@@ -435,7 +505,7 @@ const leafletHTML = useMemo(() => `
   const [pinSaved, setPinSaved] = useState(false);
   const [formError, setPinFormError] = useState("")
   const savePin = async (formData) => {
-    console.log("saving")
+    console.log("saving : ", formData)
     try {
       const res = await axios.post(`${server_api_base_url}pins.php`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -497,6 +567,27 @@ const leafletHTML = useMemo(() => `
   };
 
   const [clickedUser, setCUser] = useState(null)
+
+  const [clickedUserPins, setCUPins] = useState([]);
+  const [noUserPins, setNoUserPins] = useState(false);
+  const getUserPins = async (id)=>{
+
+    try{
+      const res = await axios.post(`${server_api_base_url}get_user_pins.php`, {"user_id" : id});
+      setCUPins(res.data);
+      console.log(res.data);
+      if(res.data.length === 0){
+        setNoUserPins(true);
+      }
+    }catch(e){
+      console.log("Error")
+    }
+ 
+  }
+
+
+
+  
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -590,34 +681,55 @@ const leafletHTML = useMemo(() => `
       </View>
     </Modal>
 
-      <WebView
-        className=" "
-        ref={webviewRef}
-        originWhitelist={["*"]}
-        source={{ html: leafletHTML }}
-        javaScriptEnabled={true}
-        geolocationEnabled={true}
-        mixedContentMode="always"
-      
-        onMessage={(event) => {
-          const data = JSON.parse(event.nativeEvent.data);
+      <View style={{ flex: 1 }}>
+        {mapLoading && (
+          <View
+            className=" first-line:py-40"
+          >
+            <ActivityIndicator size="large" color="#bbb" />
+          </View>
+        )}
 
-          if (data.type === "mapClick") {
-            const { lat, lng } = data.payload;
-            console.log("Pinned coords:", lat, lng);
+        <WebView
+          className=" "
+          ref={webviewRef}
+          originWhitelist={["*"]}
+          source={{ html: leafletHTML }}
+          javaScriptEnabled={true}
+          geolocationEnabled={true}
+          mixedContentMode="always"
+          onLoad={() => setMapLoading(false)}
+          onMessage={(event) => {
+            const data = JSON.parse(event.nativeEvent.data);
 
-            handlePinLocation(lat, lng);
-            setVisible(true);
-          }
+            if (data.type === "mapClick") {
+              const { lat, lng } = data.payload;
+              console.log("Pinned coords:", lat, lng);
 
-          // this part here 
-          if (data.type === "user") {
-            console.log("User clicked marker:", data.payload);
-            setCUser(data.payload)
-          }
-        }}
-        style={{ flex: 1 }}
-      />
+              handlePinLocation(lat, lng);
+              setVisible(true);
+              setTab("Pins"); 
+            }
+
+            if (data.type === "user") {
+              console.log("User clicked marker:", data.payload);
+              setTab("none");
+              setNoUserPins(false);
+
+              setCUser(data.payload) 
+
+            
+              try{
+                getUserPins(clickedUser.id)
+              }catch(e){
+                console.log(e);
+              } 
+            }
+          }}     
+          style={{ flex: 1 }}
+        />
+
+      </View>
 
       <View className=" absolute flex flex-row justify-between left-0 right-0 top-0 bg-white p-4 pb-0 pt-10">
         <Text className =" text-xl font-bold">Discover</Text>
@@ -635,7 +747,7 @@ const leafletHTML = useMemo(() => `
             <Feather name="bell" size={24} color="black" />
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={()=>{navigation.navigate("Login")}} className=" p-2 rounded-md">
+          <TouchableOpacity onPress={()=>{ navigation.navigate("Login")}} className=" p-2 rounded-md">
             {/* <View className="  absolute p-1 ml-6 mt-2 rounded-full bg-red-500 z-40">
             </View> */}
             <Feather name="settings" size={24} color="#111" />
@@ -661,14 +773,14 @@ const leafletHTML = useMemo(() => `
           
       <View className=" absolute left-0 bottom-10 right-0 px-2 ">
         <View className=" w-full flex flex-row right-0 py-1">
-          <View className="  mr-1 flex flex-row rounded-full bg-white p-2">
+          <TouchableOpacity onPress={()=>{setTab("pins"); setCUser(null)}} className="  mr-1 flex flex-row rounded-full bg-white p-2">
             <Feather name="map-pin" size={24} color="#4D4DFF" />
             <Text className=" font-bold px-1 pt-1 text-blue-700 text-sm">Pins</Text>
-          </View>
+          </TouchableOpacity>
 
           <View className=" mr-1 flex flex-row rounded-full bg-white p-2">
             <Feather name="user" size={24} color="#6495ED" />
-            <Text className=" font-bold px-1 pt-1 text-blue-400 text-sm">Near me</Text>
+            <Text className=" font-bold px-1 pt-1 text-blue-400 text-sm">Active</Text>
           </View>
           {/* <View className=" mr-1 flex flex-row rounded-full bg-white p-2">
             <Ionicons name="balloon-outline" size={24} color="#008B8B" />
@@ -678,8 +790,16 @@ const leafletHTML = useMemo(() => `
         
         {tab == "pins" && (
           <View className=" rounded-3xl bg-white flex-1">
-          <Text className="font-bold text-lg text-gray-800 p-4 pb-0">Pins and moments</Text>
-
+            <View className =" flex flex-row justify-between">
+              <Text className="font-bold text-lg text-gray-800 p-4 pb-0">Pins and moments</Text>
+            <View>
+            <View className =" p-4">
+              <TouchableOpacity onPress={() => setTab("none")}>
+                <AntDesign name="close" size={22} color="#aaa" />
+              </TouchableOpacity>
+            </View>
+            </View>
+          </View>
           <ScrollView
             className="p-4 after:rounded-3xl overflow-hidden"
             horizontal
@@ -703,9 +823,11 @@ const leafletHTML = useMemo(() => `
                     <Text className="pl-2 font-bold px-2 py-2 rounded-full">
                       {pin.name}
                     </Text>
-                    <Text className="pl-2 text-blue-500 font-bold border-2 border-blue-200 bg-blue-100 px-4 py-2 rounded-full">
-                      Now Open
-                    </Text>
+                   {pin.tag != "null" && (
+                     <Text className="pl-2 text-blue-500 font-bold border-2 border-blue-200 bg-blue-100 px-4 py-2 rounded-full">
+                        {pin.tag}
+                      </Text>
+                   )}
                   </View>
                   <View>
                     <View style={{ width: width * 0.6 }}>
@@ -729,9 +851,20 @@ const leafletHTML = useMemo(() => `
         </View>
         )}
 
+        
+
         {clickedUser && (
-          <View  className=" rounded-3xl bg-white flex-1 p-4 pb-20">
-          <Text className="font-bold text-lg text-gray-800 pb-2">Profile</Text>
+          <View  className=" rounded-3xl bg-white flex-1 p-4">
+            <View className =" flex flex-row justify-between pb-2">
+                <Text className="font-bold text-lg text-gray-800 pb-0">Profile</Text>
+              <View>
+              <View className ="">
+                <TouchableOpacity onPress={() => {setTab("none"); setCUser(null)}}>
+                  <AntDesign name="close" size={22} color="#aaa" />
+                </TouchableOpacity>
+              </View>
+              </View>
+            </View>
 
             <View className=" flex flex-row justify-between">
               <View className=" flex flex-row ">
@@ -748,11 +881,67 @@ const leafletHTML = useMemo(() => `
                 </View>
               </View>
 
-              <View className=" ">
-                <TouchableOpacity className="bg-blue-700 p-6 py-2 rounded-md">
-                  <Text className=" text-white text-lg font-bold ">Message</Text>
-                </TouchableOpacity>
+              
+            </View>
+
+            <View className=" mt-4 flex flex-row justify-between">
+              <View className =" w-1/2 pr-1">
+                <View className=" ">
+                  <TouchableOpacity className="bg-gray-200 p-6 py-2 rounded-md">
+                    <Text className=" text-gray-700 text-center text-lg font-bold ">Follow</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
+              <View className =" w-1/2 pl-1">
+                <View className=" ">
+                  <TouchableOpacity className="bg-blue-500 p-6 py-2 rounded-md">
+                    <Text className=" text-white text-center text-lg font-bold ">Message</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            <View className =" mt-4">
+              <Text className =" text-sm font-bold text-gray-700">Memories</Text>
+
+              {clickedUserPins.length != 0 ? (
+                <View className=" rounded-xl py-2 bg-white">
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} className="space-x-2">
+                    {clickedUserPins.map((pin, index) => (
+                      <TouchableOpacity key={index} className="items-center">
+                        <View className="w-24 h-28 rounded-xl border-1 border-gray-200 overflow-hidden">
+                          <Image
+                            source={{ uri: `${server_api_base_url}view_image.php?file=${pin.images}` }}
+                            className="w-full h-full"
+                            resizeMode="cover"
+                          />
+                        </View>
+                        <Text className="text-xs text-gray-700 mt-1">{pin.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : (
+                <View className=" rounded-xl py-2 bg-white">
+                  {!noUserPins && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} className="space-x-2">
+                      {[1,2,3,4,5,5,3,4,5,].map((pin, index) => (
+                        <TouchableOpacity key={index} className="items-center">
+                          <View className="w-24 h-28 rounded-xl border-1 border-gray-200 overflow-hidden">
+                            <View className=" w-full h-full bg-gray-200"></View>
+                          </View>
+                          <View className=" w-full h-5 mt-1 bg-gray-200 rounded-xl"></View>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              )}
+              
+
+              
+
+
             </View>
           </View>
         )}

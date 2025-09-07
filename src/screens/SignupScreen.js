@@ -17,7 +17,7 @@ import { ActivityIndicator } from "react-native";
 let server_api_base_url = "http://textie.atwebpages.com/";
 const { width, height } = Dimensions.get("window");
 
-export default function LoginScreen() {
+export default function SignupScreen() {
   const navigation = useNavigation(); 
 
 
